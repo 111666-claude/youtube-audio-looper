@@ -21,6 +21,7 @@ Live app: https://youtube-audio-looper.onrender.com/
 | YouTube download | Uses `yt-dlp` and downloads only the requested video segment, not full playlists |
 | Segment extraction | Requests the selected audio range during download |
 | Audio looping | Repeats the selected segment to the requested final duration |
+| Seamless looping | Equal-power crossfade between the clip's tail and head, repeating the mixed loop unit with no seam |
 | Validation | Validates YouTube URL, timestamps, clip length, and duration |
 | Isolated jobs | Uses per-request temporary job directories and cleans them up |
 
@@ -91,9 +92,25 @@ Request body:
   "youtube_url": "https://www.youtube.com/watch?v=HDDdKCSn25Y",
   "start": "00:20",
   "end": "00:36",
-  "duration": "01:00"
+  "duration": "01:00",
+  "seamless": true,
+  "crossfade": 0.5,
+  "loops": 0
 }
 ```
+
+| Field | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `youtube_url` | yes | - | YouTube video URL; playlists download only the selected video |
+| `start` | yes | - | Segment start, `MM:SS` or `HH:MM:SS` |
+| `end` | yes | - | Segment end, `MM:SS` or `HH:MM:SS` |
+| `duration` | yes | - | Requested final length, `MM:SS` or `HH:MM:SS` |
+| `seamless` | no | `true` | `true` applies the tail/head crossfade, `false` keeps the original plain concatenation |
+| `crossfade` | no | `0.5` | Crossfade length in seconds; ignored when `seamless` is `false` |
+| `loops` | no | derived | Explicit loop count; `0`/omitted derives it from `duration` |
+
+The web UI sends exactly these fields, so the API and the browser share the same
+parameter names and semantics.
 
 Successful response:
 
@@ -101,7 +118,15 @@ Successful response:
 200 OK
 Content-Type: audio/mpeg
 Content-Disposition: attachment; filename="looped-audio.mp3"
+X-Seamless: true
+X-Crossfade-Seconds: 0.500
+X-Loop-Count: 4
+X-Clip-Seconds: 16.000
+X-Output-Seconds: 62.000
 ```
+
+The `X-*` headers describe the timeline that was actually rendered. They are
+informational; the body is always the MP3.
 
 Error response:
 
@@ -126,6 +151,60 @@ curl -X POST http://localhost:8084/api/v1/audio/loop \
 ```
 
 Playlist and YouTube Mix URLs are accepted, but only the selected video is downloaded.
+
+### Seamless Loop Math
+
+Let, in frames at the output sample rate (44.1 kHz):
+
+- `C` = decoded clip length
+- `F` = `round(crossfade * sampleRate)`
+- `P` = `C - F` = loop unit length
+- `D` = `ceil(duration * sampleRate)`
+- `N` = loop count
+
+The loop unit mixes the clip's tail into its head with equal-power gains:
+
+```text
+u[q] = clip[C-F+q] * cos(a) + clip[q] * sin(a)   for q < F,  a = (q+0.5)/F * pi/2
+u[q] = clip[q]                                   for F <= q < P
+```
+
+The gains are computed once per frame and applied to every channel
+independently, so stereo left/right never bleed into each other. The output is
+the unit repeated:
+
+```text
+N = max(1, ceil(D / P))
+output = N * P frames
+output_seconds = N * (C - F) / sampleRate
+```
+
+Because the unit is circular, every seam (including the boundary between the
+end of the file and its beginning) is crossfaded. The output is always a whole
+number of units, so it covers `duration` and overshoots by less than one unit.
+With `crossfade = 0`, `P = C` and the formula reduces to `N = ceil(D / C)` and
+`output = N * C`, the original plain concatenation. If `loops` is set, `N` uses
+that value instead; `duration` is then only used for validation.
+
+The crossfade must be at most half the clip (`2F <= C`); a longer fade would
+overlap more than two copies of the clip. This is checked against the actual
+decoded length, because the downloaded segment can be slightly shorter than the
+requested timestamps.
+
+## Edge Cases
+
+| Case | Result |
+| --- | --- |
+| Crossfade longer than the clip | `400` with a crossfade message before any encoding; no output file is left behind |
+| Extremely short input | The fade is validated against the decoded length; small clips still loop, and an empty decode returns `422` |
+| No audio track | `422` with `Downloaded segment has no audio track`; the ffprobe check runs before decoding |
+| Download interrupted / client cancels | The request context cancels `yt-dlp`, the partial clip and output are removed, and the job directory is deleted |
+| Processing timeout (5 min) | `504` with `audio processing timed out`; the job directory is deleted |
+| Client disconnect | The handler aborts with `408` and the same cleanup runs |
+
+Every request gets an isolated `tmp/jobs/<uuid>` directory. It is removed on
+every return path, including cancellation and encoding failures, so partial
+downloads and MP3s never accumulate.
 
 ## Telegram Bot
 
@@ -241,8 +320,10 @@ Request
   -> Validate URL and timestamps
   -> Create temporary job directory
   -> Download selected audio segment with yt-dlp
-  -> Loop segment to requested duration
-  -> Return MP3 response
+  -> Decode to 44.1 kHz stereo float PCM (ffprobe first checks for an audio track)
+  -> Crossfade the clip tail into its head with equal-power gains
+  -> Repeat the loop unit N times and encode the MP3
+  -> Return MP3 response with timeline headers
   -> Remove temporary files
 ```
 
@@ -254,6 +335,10 @@ Request
 - Selected segment must not be longer than the final duration.
 - Final duration limit: 10 minutes.
 - Selected segment limit: 60 seconds.
+- `crossfade` must be between `0` and `10` seconds and no longer than half of the
+  downloaded segment (checked again against the real decoded length).
+- `loops` must be between `0` and `1000`; `0` or omitted derives the count from
+  `duration`.
 
 ## Demo
 

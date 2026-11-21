@@ -74,6 +74,50 @@
             </label>
           </div>
 
+          <label class="field field-toggle">
+            <span class="toggle-copy">
+              <span>Seamless loop</span>
+              <small>Equal-power crossfade between the end and start of every loop.</small>
+            </span>
+            <input
+              id="seamless"
+              name="seamless"
+              type="checkbox"
+              checked
+            />
+          </label>
+
+          <label class="field">
+            <span>Crossfade (seconds)</span>
+            <input
+              id="crossfade"
+              name="crossfade"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              max="10"
+              step="0.1"
+              value="0.5"
+              placeholder="0.5"
+              title="Crossfade length in seconds, at most half of the segment"
+            />
+          </label>
+
+          <label class="field">
+            <span>Loops (optional)</span>
+            <input
+              id="loops"
+              name="loops"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              max="1000"
+              step="1"
+              placeholder="Auto from duration"
+              title="Leave empty to derive the loop count from the duration"
+            />
+          </label>
+
           <button id="submit-button" type="submit">
             <span class="button-icon" aria-hidden="true">▶</span>
             <span>Create MP3</span>

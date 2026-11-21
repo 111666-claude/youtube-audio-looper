@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/cobrich/youtube-audio-looper/internal/client"
@@ -84,15 +83,15 @@ func (h *Handler) handleText(chatID int64, text string) {
 		msg := tgbotapi.NewMessage(chatID, "Ақпараттар дұрыстығын тексеріп, жазбаңызды дайындап жіберемін. Өтініш, күтіңіз...")
 		h.api.Send(msg)
 
+		// The bot uses the same request defaults as the API and the web UI:
+		// seamless looping on, crossfade DefaultCrossfadeSeconds, and a loop
+		// count derived from the requested duration.
 		req := entity.Request{
 			YoutubeURL: session.YoutubeURL,
 			Start:      session.Start,
 			End:        session.End,
 			Duration:   session.Duration,
 		}
-
-		fmt.Println(session)
-		fmt.Println(req)
 
 		audioData, err := h.audioAPIClient.CreateLoopedAudio(req)
 		if err != nil {

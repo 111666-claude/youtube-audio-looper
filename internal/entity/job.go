@@ -1,6 +1,6 @@
 package entity
 
 type Job struct {
-	ID string
+	ID  string
 	Dir string
 }

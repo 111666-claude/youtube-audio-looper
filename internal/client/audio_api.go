@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,10 @@ func (c *AudioAPIClient) CreateLoopedAudio(req entity.Request) ([]byte, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("audio api failed: status=%d body=%s", resp.StatusCode, string(data))
+	}
+
+	if len(data) == 0 {
+		return nil, errors.New("audio api returned an empty body")
 	}
 
 	return data, nil

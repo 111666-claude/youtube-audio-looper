@@ -77,6 +77,16 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+function formatLoopSummary(request) {
+  const range = `${request.start}-${request.end}`;
+  if (getSeamless(request) === false) {
+    return `${range} to ${request.duration} (plain loop)`;
+  }
+  const loops = getLoops(request);
+  const loopLabel = loops === null ? "auto loops" : `${loops} loops`;
+  return `${range} to ${request.duration} (crossfade ${getCrossfade(request)}s, ${loopLabel})`;
+}
+
 function getHistoryTitle(item) {
   try {
     const parsedURL = new URL(item.request.youtube_url);
@@ -86,11 +96,50 @@ function getHistoryTitle(item) {
   }
 }
 
+function getSeamless(request) {
+  return request.seamless !== false;
+}
+
+function getCrossfade(request) {
+  if (typeof request.crossfade === "number" && Number.isFinite(request.crossfade)) {
+    return request.crossfade;
+  }
+  return 0.5;
+}
+
+function getLoops(request) {
+  if (typeof request.loops === "number" && Number.isFinite(request.loops) && request.loops > 0) {
+    return request.loops;
+  }
+  return null;
+}
+
 function fillFormFromRequest(request) {
   form.elements.youtube_url.value = request.youtube_url;
   form.elements.start.value = request.start;
   form.elements.end.value = request.end;
   form.elements.duration.value = request.duration;
+  form.elements.seamless.checked = getSeamless(request);
+  form.elements.crossfade.value = String(getCrossfade(request));
+  const loops = getLoops(request);
+  form.elements.loops.value = loops === null ? "" : String(loops);
+  syncCrossfadeState();
+}
+
+function syncCrossfadeState() {
+  const crossfadeInput = form.elements.crossfade;
+  const seamlessInput = form.elements.seamless;
+  if (!crossfadeInput || !seamlessInput) {
+    return;
+  }
+  crossfadeInput.disabled = !seamlessInput.checked;
+  crossfadeInput.closest(".field")?.classList.toggle("is-disabled", !seamlessInput.checked);
+
+  const loopsInput = form.elements.loops;
+  if (loopsInput) {
+    loopsInput.disabled = !seamlessInput.checked;
+    loopsInput.closest(".field")?.classList.toggle("is-disabled", !seamlessInput.checked);
+  }
 }
 
 function saveRequestHistoryItem(request) {
@@ -238,7 +287,7 @@ function showAudioSource(audioSource, request) {
     <a class="download-link" href="${audioSource}" download="looped-audio.mp3">
       Download MP3
     </a>
-    ${request ? `<p class="result-details">${escapeHtml(request.start)}-${escapeHtml(request.end)} to ${escapeHtml(request.duration)}</p>` : ""}
+    ${request ? `<p class="result-details">${escapeHtml(formatLoopSummary(request))}</p>` : ""}
     ${renderHistory()}
   `;
 }
@@ -279,7 +328,7 @@ function renderHistory() {
               <article class="history-item">
                 <button class="history-play" type="button" data-history-id="${escapeHtml(item.id)}">
                   <span>${escapeHtml(getHistoryTitle(item))}</span>
-                  <small>${escapeHtml(item.request.start)}-${escapeHtml(item.request.end)} - ${escapeHtml(item.request.duration)}</small>
+                  <small>${escapeHtml(formatLoopSummary(item.request))}</small>
                   <small>${escapeHtml(formatDate(item.createdAt))}</small>
                 </button>
               </article>
@@ -316,12 +365,26 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const formData = new FormData(form);
+  const seamless = formData.get("seamless") === "on";
+  const crossfadeValue = Number.parseFloat(formData.get("crossfade"));
+
   const payload = {
     youtube_url: formData.get("youtube_url").trim(),
     start: formData.get("start").trim(),
     end: formData.get("end").trim(),
     duration: formData.get("duration").trim(),
+    seamless,
   };
+
+  const loopsValue = Number.parseInt(formData.get("loops"), 10);
+
+  if (seamless) {
+    payload.crossfade = Number.isFinite(crossfadeValue) ? crossfadeValue : 0.5;
+
+    if (Number.isInteger(loopsValue) && loopsValue > 0) {
+      payload.loops = loopsValue;
+    }
+  }
 
   setLoading(true);
   startProgress();
@@ -373,6 +436,9 @@ result.addEventListener("click", (event) => {
     }
   }
 });
+
+form.elements.seamless.addEventListener("change", syncCrossfadeState);
+syncCrossfadeState();
 
 migrateLegacyHistory();
 
